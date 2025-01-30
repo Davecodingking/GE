@@ -127,6 +127,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="performance_test.cpp" />
     <ClCompile Include="raster.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -134,11 +135,15 @@
     <ClInclude Include="GamesEngineeringBase.h" />
     <ClInclude Include="light.h" />
     <ClInclude Include="matrix.h" />
+    <ClInclude Include="matrix_simd.h" />
     <ClInclude Include="mesh.h" />
+    <ClInclude Include="performance_test.h" />
     <ClInclude Include="renderer.h" />
     <ClInclude Include="RNG.h" />
+    <ClInclude Include="simd_utils.h" />
     <ClInclude Include="triangle.h" />
     <ClInclude Include="vec4.h" />
+    <ClInclude Include="vec4_simd.h" />
     <ClInclude Include="zbuffer.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

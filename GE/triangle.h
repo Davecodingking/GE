@@ -1,10 +1,12 @@
-#pragma once
+﻿#pragma once
 
 #include "mesh.h"
 #include "colour.h"
 #include "renderer.h"
 #include "light.h"
 #include <iostream>
+#include "vec4_simd.h"
+#include "matrix_simd.h"
 
 // Simple support class for a 2D vector
 class vec2D {
@@ -18,10 +20,17 @@ public:
     vec2D(float _x, float _y) : x(_x), y(_y) {}
 
     // Constructor initializes components from a vec4
+#if defined(USE_SIMD_OPTIMIZATION)
+    vec2D(Vec4SIMD v) {
+        x = v[0];
+        y = v[1];
+    }
+#else
     vec2D(vec4 v) {
         x = v[0];
         y = v[1];
     }
+#endif
 
     // Display the vector components
     void display() { std::cout << x << '\t' << y << std::endl; }
@@ -37,7 +46,19 @@ public:
 
 // Class representing a triangle for rendering purposes
 class triangle {
-    Vertex v[3];       // Vertices of the triangle
+
+#if defined(USE_SIMD_OPTIMIZATION)
+    struct VertexSIMD {
+        Vec4SIMD p;
+        Vec4SIMD normal;
+        colour rgb;
+    };
+    VertexSIMD v[3];
+#else
+    Vertex v[3];
+#endif
+
+    
     float area;        // Area of the triangle
     colour col[3];     // Colors for each vertex of the triangle
 
@@ -45,16 +66,27 @@ public:
     // Constructor initializes the triangle with three vertices
     // Input Variables:
     // - v1, v2, v3: Vertices defining the triangle
+#if defined(USE_SIMD_OPTIMIZATION)
+    triangle(const VertexSIMD& v1, const VertexSIMD& v2, const VertexSIMD& v3) {
+        v[0] = v1;
+        v[1] = v2;
+        v[2] = v3;
+
+        vec2D e1 = vec2D(v[1].p - v[0].p);
+        vec2D e2 = vec2D(v[2].p - v[0].p);
+        area = abs(e1.x * e2.y - e1.y * e2.x);
+    }
+#else
     triangle(const Vertex& v1, const Vertex& v2, const Vertex& v3) {
         v[0] = v1;
         v[1] = v2;
         v[2] = v3;
 
-        // Calculate the 2D area of the triangle
         vec2D e1 = vec2D(v[1].p - v[0].p);
         vec2D e2 = vec2D(v[2].p - v[0].p);
         area = abs(e1.x * e2.y - e1.y * e2.x);
     }
+#endif
 
     // Helper function to compute the cross product for barycentric coordinates
     // Input Variables:
@@ -72,60 +104,53 @@ public:
     // Output Variables:
     // - alpha, beta, gamma: Barycentric coordinates of the point
     // Returns true if the point is inside the triangle, false otherwise
+
     bool getCoordinates(vec2D p, float& alpha, float& beta, float& gamma) {
+#if defined(USE_SIMD_OPTIMIZATION)
+        // SIMD优化的重心坐标计算
         alpha = getC(vec2D(v[0].p), vec2D(v[1].p), p) / area;
         beta = getC(vec2D(v[1].p), vec2D(v[2].p), p) / area;
         gamma = getC(vec2D(v[2].p), vec2D(v[0].p), p) / area;
+#else
+        alpha = getC(vec2D(v[0].p), vec2D(v[1].p), p) / area;
+        beta = getC(vec2D(v[1].p), vec2D(v[2].p), p) / area;
+        gamma = getC(vec2D(v[2].p), vec2D(v[0].p), p) / area;
+#endif
 
         if (alpha < 0.f || beta < 0.f || gamma < 0.f) return false;
         return true;
     }
 
-    // Template function to interpolate values using barycentric coordinates
-    // Input Variables:
-    // - alpha, beta, gamma: Barycentric coordinates
-    // - a1, a2, a3: Values to interpolate
-    // Returns the interpolated value
     template <typename T>
     T interpolate(float alpha, float beta, float gamma, T a1, T a2, T a3) {
         return (a1 * alpha) + (a2 * beta) + (a3 * gamma);
     }
 
-    // Draw the triangle on the canvas
-    // Input Variables:
-    // - renderer: Renderer object for drawing
-    // - L: Light object for shading calculations
-    // - ka, kd: Ambient and diffuse lighting coefficients
     void draw(Renderer& renderer, Light& L, float ka, float kd) {
         vec2D minV, maxV;
-
-        // Get the screen-space bounds of the triangle
         getBoundsWindow(renderer.canvas, minV, maxV);
 
-        // Skip very small triangles
         if (area < 1.f) return;
 
-        // Iterate over the bounding box and check each pixel
+#if defined(USE_SIMD_OPTIMIZATION)
+        // SIMD优化的渲染循环
         for (int y = (int)(minV.y); y < (int)ceil(maxV.y); y++) {
             for (int x = (int)(minV.x); x < (int)ceil(maxV.x); x++) {
                 float alpha, beta, gamma;
 
-                // Check if the pixel lies inside the triangle
                 if (getCoordinates(vec2D((float)x, (float)y), alpha, beta, gamma)) {
-                    // Interpolate color, depth, and normals
                     colour c = interpolate(beta, gamma, alpha, v[0].rgb, v[1].rgb, v[2].rgb);
                     c.clampColour();
+
                     float depth = interpolate(beta, gamma, alpha, v[0].p[2], v[1].p[2], v[2].p[2]);
-                    vec4 normal = interpolate(beta, gamma, alpha, v[0].normal, v[1].normal, v[2].normal);
+                    Vec4SIMD normal = interpolate(beta, gamma, alpha, v[0].normal, v[1].normal, v[2].normal);
                     normal.normalise();
 
-                    // Perform Z-buffer test and apply shading
                     if (renderer.zbuffer(x, y) > depth && depth > 0.01f) {
-                        // typical shader begin
                         L.omega_i.normalise();
-                        float dot = max(vec4::dot(L.omega_i, normal), 0.0f);
-                        colour a = (c * kd) * (L.L * dot + (L.ambient * kd));
-                        // typical shader end
+                        float dot = max(Vec4SIMD::dot(Vec4SIMD(L.omega_i), normal), 0.0f);
+                        colour a = (c * kd) * (L.L * dot + (L.ambient * ka));
+
                         unsigned char r, g, b;
                         a.toRGB(r, g, b);
                         renderer.canvas.draw(x, y, r, g, b);
@@ -134,6 +159,34 @@ public:
                 }
             }
         }
+#else
+        // 原始实现的渲染循环
+        for (int y = (int)(minV.y); y < (int)ceil(maxV.y); y++) {
+            for (int x = (int)(minV.x); x < (int)ceil(maxV.x); x++) {
+                float alpha, beta, gamma;
+
+                if (getCoordinates(vec2D((float)x, (float)y), alpha, beta, gamma)) {
+                    colour c = interpolate(beta, gamma, alpha, v[0].rgb, v[1].rgb, v[2].rgb);
+                    c.clampColour();
+
+                    float depth = interpolate(beta, gamma, alpha, v[0].p[2], v[1].p[2], v[2].p[2]);
+                    vec4 normal = interpolate(beta, gamma, alpha, v[0].normal, v[1].normal, v[2].normal);
+                    normal.normalise();
+
+                    if (renderer.zbuffer(x, y) > depth && depth > 0.01f) {
+                        L.omega_i.normalise();
+                        float dot = max(vec4::dot(L.omega_i, normal), 0.0f);
+                        colour a = (c * kd) * (L.L * dot + (L.ambient * ka));
+
+                        unsigned char r, g, b;
+                        a.toRGB(r, g, b);
+                        renderer.canvas.draw(x, y, r, g, b);
+                        renderer.zbuffer(x, y) = depth;
+                    }
+                }
+            }
+        }
+#endif
     }
 
     // Compute the 2D bounds of the triangle
