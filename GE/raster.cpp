@@ -23,6 +23,25 @@
 // - mesh: Pointer to the Mesh object containing vertices and triangles to render.
 // - camera: Matrix representing the camera's transformation.
 // - L: Light object representing the lighting parameters.
+
+
+int g_maxCycles;
+bool g_isPerformanceTest;
+
+// 设置场景运行模式的函数
+void setSceneRunMode(bool isPerformanceTest) {
+	if (isPerformanceTest) {
+		// 性能测试模式：限制cycle数
+		g_maxCycles = 1;  // 可以根据需要调整这个值
+		g_isPerformanceTest = true;
+	}
+	else {
+		// 单一场景模式：无限制运行
+		g_maxCycles = -1;  // 使用-1表示无限制
+		g_isPerformanceTest = false;
+	}
+}
+
 void render(Renderer& renderer, Mesh* mesh, matrix& camera, Light& L) {
 	// 为当前帧启动性能指标收集
 	renderer.startFrameMetrics();
@@ -165,61 +184,123 @@ void scene1() {
 	matrix camera;
 	Light L{ vec4(0.f, 1.f, 1.f, 0.f), colour(1.0f, 1.0f, 1.0f), colour(0.1f, 0.1f, 0.1f) };
 
-	bool running = true;
+	// 性能统计变量初始化 - 这些变量将用于跟踪整个运行过程的性能
+	int totalTrianglesProcessed = 0;
+	int totalPixelsProcessed = 0;
+	double totalFrameTime = 0.0;
+	int frameCount = 0;
 
+	// 场景状态控制
+	bool running = true;
 	std::vector<Mesh*> scene;
 
-	// Create a scene of 40 cubes with random rotations
+	// 创建40个立方体的场景
 	for (unsigned int i = 0; i < 20; i++) {
+		// 创建并放置左侧立方体
 		Mesh* m = new Mesh();
 		*m = Mesh::makeCube(1.f);
 		m->world = matrix::makeTranslation(-2.0f, 0.0f, (-3 * static_cast<float>(i))) * makeRandomRotation();
 		scene.push_back(m);
+
+		// 创建并放置右侧立方体
 		m = new Mesh();
 		*m = Mesh::makeCube(1.f);
 		m->world = matrix::makeTranslation(2.0f, 0.0f, (-3 * static_cast<float>(i))) * makeRandomRotation();
 		scene.push_back(m);
 	}
 
-	float zoffset = 8.0f; // Initial camera Z-offset
-	float step = -0.1f;  // Step size for camera movement
+	// 相机和动画控制参数
+	float zoffset = 8.0f;
+	float step = -0.1f;
 
+	// 时间和周期计数初始化
 	auto start = std::chrono::high_resolution_clock::now();
 	std::chrono::time_point<std::chrono::high_resolution_clock> end;
-	int cycle = 0;
+	int cycle = 0;        // 用于计算来回运动
+	int cycleNumber = 0;  // 用于显示周期编号
 
-	// Main rendering loop
+	// 主渲染循环
 	while (running) {
+		// 记录帧开始时间，用于计算单帧渲染时间
+		auto frameStart = std::chrono::high_resolution_clock::now();
+
+		// 基础渲染准备
 		renderer.canvas.checkInput();
 		renderer.clear();
 
-		camera = matrix::makeTranslation(0, 0, -zoffset); // Update camera position
+		// 更新相机位置
+		camera = matrix::makeTranslation(0, 0, -zoffset);
 
-		// Rotate the first two cubes in the scene
+		// 更新场景中前两个立方体的旋转
 		scene[0]->world = scene[0]->world * matrix::makeRotateXYZ(0.1f, 0.1f, 0.0f);
 		scene[1]->world = scene[1]->world * matrix::makeRotateXYZ(0.0f, 0.1f, 0.2f);
 
-		if (renderer.canvas.keyPressed(VK_ESCAPE)) break;
+		// 检查ESC退出，如果退出也要输出完整统计信息
+		if (renderer.canvas.keyPressed(VK_ESCAPE)) {
+			std::cout << "\nPerformance Summary for Scene1 (ESC exit):\n";
+			std::cout << "Total Cycles Completed: " << cycleNumber << "\n";
+			std::cout << "Total Frames: " << frameCount << "\n";
+			std::cout << "Average Frame Time: " << totalFrameTime / frameCount << "ms\n";
+			std::cout << "Average FPS: " << 1000.0 / (totalFrameTime / frameCount) << "\n";
+			std::cout << "Total Triangles Processed: " << totalTrianglesProcessed << "\n";
+			std::cout << "Average Triangles per Frame: " << totalTrianglesProcessed / frameCount << "\n";
+			std::cout << "Total Pixels Processed: " << totalPixelsProcessed << "\n";
+			std::cout << "Average Pixels per Frame: " << totalPixelsProcessed / frameCount << "\n";
+			break;
+		}
 
+		// 渲染所有物体
+		for (auto& m : scene) {
+			render(renderer, m, camera, L);
+		}
+		renderer.present();
+
+		// 收集每帧的性能数据
+		auto frameEnd = std::chrono::high_resolution_clock::now();
+		double frameTime = std::chrono::duration<double, std::milli>(frameEnd - frameStart).count();
+		totalFrameTime += frameTime;
+		frameCount++;
+		totalTrianglesProcessed += renderer.getPerformanceMetrics().triangleCount;
+		totalPixelsProcessed += renderer.getPerformanceMetrics().pixelsProcessed;
+
+		// 更新相机位置并检查周期完成情况
 		zoffset += step;
 		if (zoffset < -60.f || zoffset > 8.f) {
 			step *= -1.f;
-			if (++cycle % 2 == 0) {
+			if (++cycle % 2 == 0) {  // 每完成一个来回运动
+				cycleNumber++;        // 增加周期计数
 				end = std::chrono::high_resolution_clock::now();
-				std::cout << cycle / 2 << " :" << std::chrono::duration<double, std::milli>(end - start).count() << "ms\n";
+
+				// 输出当前周期的时间和阶段性统计
+				std::cout << cycleNumber << " :"
+					<< std::chrono::duration<double, std::milli>(end - start).count() << "ms\n";
+
+				// 在性能测试模式下检查是否达到最大周期数
+				if (g_isPerformanceTest && cycleNumber >= g_maxCycles) {
+					// 输出最终性能统计
+					std::cout << "\nPerformance Summary for Scene1 (Performance Test):\n";
+					std::cout << "Total Cycles Completed: " << cycleNumber << "\n";
+					std::cout << "Total Frames: " << frameCount << "\n";
+					std::cout << "Average Frame Time: " << totalFrameTime / frameCount << "ms\n";
+					std::cout << "Average FPS: " << 1000.0 / (totalFrameTime / frameCount) << "\n";
+					std::cout << "Total Triangles Processed: " << totalTrianglesProcessed << "\n";
+					std::cout << "Average Triangles per Frame: " << totalTrianglesProcessed / frameCount << "\n";
+					std::cout << "Total Pixels Processed: " << totalPixelsProcessed << "\n";
+					std::cout << "Average Pixels per Frame: " << totalPixelsProcessed / frameCount << "\n";
+					running = false;
+					break;
+				}
+
 				start = std::chrono::high_resolution_clock::now();
 			}
 		}
-
-		for (auto& m : scene)
-			render(renderer, m, camera, L);
-		renderer.present();
 	}
 
-	for (auto& m : scene)
+	// 清理场景资源
+	for (auto& m : scene) {
 		delete m;
+	}
 }
-
 // Scene with a grid of cubes and a moving sphere
 // No input variables
 void scene2() {
@@ -227,26 +308,36 @@ void scene2() {
 	matrix camera = matrix::makeIdentity();
 	Light L{ vec4(0.f, 1.f, 1.f, 0.f), colour(1.0f, 1.0f, 1.0f), colour(0.1f, 0.1f, 0.1f) };
 
-	std::vector<Mesh*> scene;
+	// 性能统计变量初始化
+	int totalTrianglesProcessed = 0;
+	int totalPixelsProcessed = 0;
+	double totalFrameTime = 0.0;
+	int frameCount = 0;
 
-	struct rRot { float x; float y; float z; }; // Structure to store random rotation parameters
+	std::vector<Mesh*> scene;
+	struct rRot { float x; float y; float z; };
 	std::vector<rRot> rotations;
 
+	// 初始化随机数生成器
 	RandomNumberGenerator& rng = RandomNumberGenerator::getInstance();
 
-	// Create a grid of cubes with random rotations
+	// 创建6x8的立方体网格
 	for (unsigned int y = 0; y < 6; y++) {
 		for (unsigned int x = 0; x < 8; x++) {
 			Mesh* m = new Mesh();
 			*m = Mesh::makeCube(1.f);
 			scene.push_back(m);
-			m->world = matrix::makeTranslation(-7.0f + (static_cast<float>(x) * 2.f), 5.0f - (static_cast<float>(y) * 2.f), -8.f);
-			rRot r{ rng.getRandomFloat(-.1f, .1f), rng.getRandomFloat(-.1f, .1f), rng.getRandomFloat(-.1f, .1f) };
+			m->world = matrix::makeTranslation(-7.0f + (static_cast<float>(x) * 2.f),
+				5.0f - (static_cast<float>(y) * 2.f), -8.f);
+			// 为每个立方体生成随机旋转参数
+			rRot r{ rng.getRandomFloat(-.1f, .1f),
+				   rng.getRandomFloat(-.1f, .1f),
+				   rng.getRandomFloat(-.1f, .1f) };
 			rotations.push_back(r);
 		}
 	}
 
-	// Create a sphere and add it to the scene
+	// 创建并添加球体
 	Mesh* sphere = new Mesh();
 	*sphere = Mesh::makeSphere(1.0f, 10, 20);
 	scene.push_back(sphere);
@@ -254,129 +345,288 @@ void scene2() {
 	float sphereStep = 0.1f;
 	sphere->world = matrix::makeTranslation(sphereOffset, 0.f, -6.f);
 
+	// 时间和周期计数初始化
 	auto start = std::chrono::high_resolution_clock::now();
 	std::chrono::time_point<std::chrono::high_resolution_clock> end;
 	int cycle = 0;
+	int cycleNumber = 0;
 
 	bool running = true;
 	while (running) {
+		// 记录帧开始时间
+		auto frameStart = std::chrono::high_resolution_clock::now();
+
 		renderer.canvas.checkInput();
 		renderer.clear();
 
-		// Rotate each cube in the grid
-		for (unsigned int i = 0; i < rotations.size(); i++)
-			scene[i]->world = scene[i]->world * matrix::makeRotateXYZ(rotations[i].x, rotations[i].y, rotations[i].z);
+		// 更新立方体网格的旋转
+		for (unsigned int i = 0; i < rotations.size(); i++) {
+			scene[i]->world = scene[i]->world *
+				matrix::makeRotateXYZ(rotations[i].x, rotations[i].y, rotations[i].z);
+		}
 
-		// Move the sphere back and forth
+		// 更新球体位置
 		sphereOffset += sphereStep;
 		sphere->world = matrix::makeTranslation(sphereOffset, 0.f, -6.f);
+
+		// 检查ESC退出并输出统计信息
+		if (renderer.canvas.keyPressed(VK_ESCAPE)) {
+			std::cout << "\nPerformance Summary for Scene2 (ESC exit):\n";
+			std::cout << "Total Cycles Completed: " << cycleNumber << "\n";
+			std::cout << "Total Frames: " << frameCount << "\n";
+			std::cout << "Average Frame Time: " << totalFrameTime / frameCount << "ms\n";
+			std::cout << "Average FPS: " << 1000.0 / (totalFrameTime / frameCount) << "\n";
+			std::cout << "Total Triangles Processed: " << totalTrianglesProcessed << "\n";
+			std::cout << "Average Triangles per Frame: " << totalTrianglesProcessed / frameCount << "\n";
+			std::cout << "Total Pixels Processed: " << totalPixelsProcessed << "\n";
+			std::cout << "Average Pixels per Frame: " << totalPixelsProcessed / frameCount << "\n";
+			break;
+		}
+
+		// 渲染场景中的所有物体
+		for (auto& m : scene) {
+			render(renderer, m, camera, L);
+		}
+		renderer.present();
+
+		// 收集每帧的性能数据
+		auto frameEnd = std::chrono::high_resolution_clock::now();
+		double frameTime = std::chrono::duration<double, std::milli>(frameEnd - frameStart).count();
+		totalFrameTime += frameTime;
+		frameCount++;
+		totalTrianglesProcessed += renderer.getPerformanceMetrics().triangleCount;
+		totalPixelsProcessed += renderer.getPerformanceMetrics().pixelsProcessed;
+
+		// 检查球体运动周期和性能统计
 		if (sphereOffset > 6.0f || sphereOffset < -6.0f) {
 			sphereStep *= -1.f;
 			if (++cycle % 2 == 0) {
+				cycleNumber++;
 				end = std::chrono::high_resolution_clock::now();
-				std::cout << cycle / 2 << " :" << std::chrono::duration<double, std::milli>(end - start).count() << "ms\n";
+
+				// 输出当前周期的时间
+				std::cout << cycleNumber << " :"
+					<< std::chrono::duration<double, std::milli>(end - start).count() << "ms\n";
+
+				// 在性能测试模式下检查是否达到最大周期数
+				if (g_isPerformanceTest && cycleNumber >= g_maxCycles) {
+					// 输出最终性能统计
+					std::cout << "\nPerformance Summary for Scene2 (Performance Test):\n";
+					std::cout << "Total Cycles Completed: " << cycleNumber << "\n";
+					std::cout << "Total Frames: " << frameCount << "\n";
+					std::cout << "Average Frame Time: " << totalFrameTime / frameCount << "ms\n";
+					std::cout << "Average FPS: " << 1000.0 / (totalFrameTime / frameCount) << "\n";
+					std::cout << "Total Triangles Processed: " << totalTrianglesProcessed << "\n";
+					std::cout << "Average Triangles per Frame: " << totalTrianglesProcessed / frameCount << "\n";
+					std::cout << "Total Pixels Processed: " << totalPixelsProcessed << "\n";
+					std::cout << "Average Pixels per Frame: " << totalPixelsProcessed / frameCount << "\n";
+					running = false;
+					break;
+				}
+
 				start = std::chrono::high_resolution_clock::now();
 			}
 		}
-
-		if (renderer.canvas.keyPressed(VK_ESCAPE)) break;
-
-		for (auto& m : scene)
-			render(renderer, m, camera, L);
-		renderer.present();
 	}
 
-	for (auto& m : scene)
+	// 清理场景资源
+	for (auto& m : scene) {
 		delete m;
+	}
 }
 
 void scene3() {
 	Renderer renderer;
 	matrix camera = matrix::makeIdentity();
-	Light L{ vec4(0.f, 1.f, 1.f, 0.f), colour(1.0f, 1.0f, 1.0f), colour(0.1f, 0.1f, 0.1f) };
+	// 调整光照方向和强度，使球体渲染更自然
+	Light L{ vec4(0.5f, 0.5f, 1.0f, 0.0f), colour(1.0f, 1.0f, 1.0f), colour(0.4f, 0.4f, 0.4f) };
+
+	// 性能统计变量初始化
+	int totalTrianglesProcessed = 0;
+	int totalPixelsProcessed = 0;
+	double totalFrameTime = 0.0;
+	int frameCount = 0;
 
 	std::vector<Mesh*> scene;
 
-	// 设置网格参数
-	const int GRID_SIZE = 8;     // 8x8的网格提供了64个球体，这个数量足够产生明显的计算负载
-	const float SPACING = 2.0f;   // 球体间距设置为2.0保证有适量的重叠
-	const int SPHERE_DETAIL = 20; // 球体的细分程度，影响每个球体的顶点数量
+	// 创建原子核 - 增加细分度以获得更平滑的效果
+	Mesh* nucleus = new Mesh();
+	*nucleus = Mesh::makeSphere(1.0f, 64, 128);  // 增加细分度
+	nucleus->col.set(1.0f, 0.2f, 0.2f);        // 明亮的红色
+	nucleus->ka = 0.6f;                         // 增加环境光系数
+	nucleus->kd = 0.8f;                         // 适度的漫反射
+	nucleus->world = matrix::makeTranslation(0.0f, 0.0f, -10.0f);
+	scene.push_back(nucleus);
 
-	// 创建球体网格
-	for (int y = 0; y < GRID_SIZE; y++) {
-		for (int x = 0; x < GRID_SIZE; x++) {
-			Mesh* sphere = new Mesh();
-			// 使用较高的细分度创建球体，增加计算负载
-			*sphere = Mesh::makeSphere(1.0f, SPHERE_DETAIL, SPHERE_DETAIL * 2);
-
-			// 计算球体在网格中的位置
-			float xPos = (x - GRID_SIZE / 2) * SPACING;
-			float yPos = (y - GRID_SIZE / 2) * SPACING;
-			sphere->world = matrix::makeTranslation(xPos, yPos, -10.0f);
-
-			// 给每个球体设置稍微不同的颜色，便于视觉区分
-			float r = 0.5f + (float)x / GRID_SIZE * 0.5f;
-			float g = 0.5f + (float)y / GRID_SIZE * 0.5f;
-			float b = 0.7f;
-			sphere->setColour(colour(r, g, b), 0.2f, 0.8f);
-
-			scene.push_back(sphere);
-		}
+	// 创建第一层电子（2个）
+	for (int i = 0; i < 2; i++) {
+		Mesh* electron = new Mesh();
+		*electron = Mesh::makeSphere(0.25f, 16, 32);  // 稍微减小电子大小，增加细分
+		electron->col.set(0.3f, 0.7f, 1.0f);         // 明亮的蓝色
+		electron->ka = 0.6f;
+		electron->kd = 0.8f;
+		scene.push_back(electron);
 	}
 
-	/*auto start = std::chrono::high_resolution_clock::now();
-	std::chrono::time_point<std::chrono::high_resolution_clock> end;
-	int cycle = 0;*/
+	// 创建第二层电子（6个）
+	for (int i = 0; i < 6; i++) {
+		Mesh* electron = new Mesh();
+		*electron = Mesh::makeSphere(0.25f, 16, 32);
+		electron->col.set(0.3f, 1.0f, 0.3f);         // 明亮的绿色
+		electron->ka = 0.6f;
+		electron->kd = 0.8f;
+		scene.push_back(electron);
+	}
 
-	int frameCount = 0;
-	auto totalStart = std::chrono::high_resolution_clock::now();
+	// 创建轨道可视化点
+	const int ORBIT_POINTS = 48;  // 增加轨道点数量使轨道更平滑
+	// 内层轨道
+	for (int i = 0; i < ORBIT_POINTS; i++) {
+		Mesh* point = new Mesh();
+		*point = Mesh::makeSphere(0.04f, 8, 16);     // 更小的轨道点
+		point->col.set(0.4f, 0.6f, 0.8f);           // 柔和的蓝色
+		point->ka = 0.4f;                           // 减小轨道点的亮度
+		point->kd = 0.6f;
+		scene.push_back(point);
+	}
+
+	// 外层轨道
+	for (int i = 0; i < ORBIT_POINTS; i++) {
+		Mesh* point = new Mesh();
+		*point = Mesh::makeSphere(0.04f, 8, 16);
+		point->col.set(0.4f, 0.8f, 0.4f);           // 柔和的绿色
+		point->ka = 0.4f;
+		point->kd = 0.6f;
+		scene.push_back(point);
+	}
+
+	// 轨道参数
+	const float INNER_RADIUS = 2.8f;  
+	const float OUTER_RADIUS = 4.8f;
+
+	// 动画控制
+	float animationTime = 0.0f;
+	const float CYCLE_DURATION = 8.0f * M_PI; 
+	int cycleNumber = 0;
+
+	// 电子速度变化因子
+	std::vector<float> electronSpeeds;
+	for (int i = 0; i < 8; i++) {
+		// 降低速度系数，使动画变慢
+		electronSpeeds.push_back(0.2f + RandomNumberGenerator::getInstance().getRandomFloat(-0.2f, 0.2f));
+	}
+
+	// 时间计数初始化
+	auto start = std::chrono::high_resolution_clock::now();
+	std::chrono::time_point<std::chrono::high_resolution_clock> end;
 
 	bool running = true;
 	while (running) {
+		auto frameStart = std::chrono::high_resolution_clock::now();
+
 		renderer.canvas.checkInput();
 		renderer.clear();
 
-		// 为每个球体创建独特的动画
-		for (size_t i = 0; i < scene.size(); i++) {
-			// 使用球体在网格中的位置计算旋转角度，创造波浪效果
-			int gridX = i % GRID_SIZE;
-			int gridY = i / GRID_SIZE;
-			float timeOffset = static_cast<float>(frameCount) * 0.01f;
-			float xAngle = std::sin(timeOffset + gridX * 0.5f) * 0.02f;
-			float yAngle = std::cos(timeOffset + gridY * 0.5f) * 0.02f;
+		// 原子核旋转（降低旋转速度）
+		scene[0]->world = matrix::makeTranslation(0.0f, 0.0f, -10.0f) *
+			matrix::makeRotateY(animationTime * 0.12f);
 
-			scene[i]->world = scene[i]->world * matrix::makeRotateXYZ(xAngle, yAngle, 0.0f);
+		// 更新轨道点位置
+		int orbitStartIndex = 8;
+
+		// 内层轨道点
+		for (int i = 0; i < ORBIT_POINTS; i++) {
+			float angle = (2.0f * M_PI * i) / ORBIT_POINTS;
+			float x = INNER_RADIUS * cos(angle);
+			float y = INNER_RADIUS * sin(angle);
+			scene[orbitStartIndex + i]->world = matrix::makeTranslation(x, y, -10.0f);
 		}
 
-		if (renderer.canvas.keyPressed(VK_ESCAPE)) break;
+		// 外层轨道点
+		for (int i = 0; i < ORBIT_POINTS; i++) {
+			float angle = (2.0f * M_PI * i) / ORBIT_POINTS;
+			float x = OUTER_RADIUS * cos(angle);
+			float y = OUTER_RADIUS * sin(angle);
+			scene[orbitStartIndex + ORBIT_POINTS + i]->world =
+				matrix::makeTranslation(x, y, -10.0f);
+		}
+
+		// 更新内层电子位置
+		for (int i = 0; i < 2; i++) {
+			float angle = animationTime * electronSpeeds[i] + (M_PI * i);
+			float x = INNER_RADIUS * cos(angle);
+			float y = INNER_RADIUS * sin(angle);
+			scene[1 + i]->world = matrix::makeTranslation(x, y, -10.0f);
+		}
+
+		// 更新外层电子位置
+		for (int i = 0; i < 6; i++) {
+			float angle = animationTime * electronSpeeds[i + 2] + (2.0f * M_PI * i / 6.0f);
+			float x = OUTER_RADIUS * cos(angle);
+			float y = OUTER_RADIUS * sin(angle);
+			scene[3 + i]->world = matrix::makeTranslation(x, y, -10.0f);
+		}
+
+		// ESC退出检查
+		if (renderer.canvas.keyPressed(VK_ESCAPE)) {
+			std::cout << "\nPerformance Summary for Scene3 (ESC exit):\n";
+			std::cout << "Total Cycles Completed: " << cycleNumber << "\n";
+			std::cout << "Total Frames: " << frameCount << "\n";
+			std::cout << "Average Frame Time: " << totalFrameTime / frameCount << "ms\n";
+			std::cout << "Average FPS: " << 1000.0 / (totalFrameTime / frameCount) << "\n";
+			std::cout << "Total Triangles Processed: " << totalTrianglesProcessed << "\n";
+			std::cout << "Average Triangles per Frame: " << totalTrianglesProcessed / frameCount << "\n";
+			std::cout << "Total Pixels Processed: " << totalPixelsProcessed << "\n";
+			std::cout << "Average Pixels per Frame: " << totalPixelsProcessed / frameCount << "\n";
+			break;
+		}
 
 		// 渲染场景
-		for (auto& m : scene)
+		for (auto& m : scene) {
 			render(renderer, m, camera, L);
-
+		}
 		renderer.present();
-		frameCount++;
 
-		// 每100帧输出一次性能报告
-		if (frameCount % 100 == 0) {
-			std::cout << "Frame " << frameCount << "\n";
-			std::cout << renderer.getPerformanceReport();
-			std::cout << "-------------------\n";
+		// 性能数据收集
+		auto frameEnd = std::chrono::high_resolution_clock::now();
+		double frameTime = std::chrono::duration<double, std::milli>(frameEnd - frameStart).count();
+		totalFrameTime += frameTime;
+		frameCount++;
+		totalTrianglesProcessed += renderer.getPerformanceMetrics().triangleCount;
+		totalPixelsProcessed += renderer.getPerformanceMetrics().pixelsProcessed;
+
+		// 更新动画时间（可以根据需要调整）
+		animationTime += 0.02f;  // 降低时间增量，使动画更慢
+		if (animationTime >= CYCLE_DURATION) {
+			cycleNumber++;
+			end = std::chrono::high_resolution_clock::now();
+
+			std::cout << cycleNumber << " :"
+				<< std::chrono::duration<double, std::milli>(end - start).count() << "ms\n";
+
+			if (g_isPerformanceTest && cycleNumber >= g_maxCycles) {
+				std::cout << "\nPerformance Summary for Scene3 (Performance Test):\n";
+				std::cout << "Total Cycles Completed: " << cycleNumber << "\n";
+				std::cout << "Total Frames: " << frameCount << "\n";
+				std::cout << "Average Frame Time: " << totalFrameTime / frameCount << "ms\n";
+				std::cout << "Average FPS: " << 1000.0 / (totalFrameTime / frameCount) << "\n";
+				std::cout << "Total Triangles Processed: " << totalTrianglesProcessed << "\n";
+				std::cout << "Average Triangles per Frame: " << totalTrianglesProcessed / frameCount << "\n";
+				std::cout << "Total Pixels Processed: " << totalPixelsProcessed << "\n";
+				std::cout << "Average Pixels per Frame: " << totalPixelsProcessed / frameCount << "\n";
+				running = false;
+				break;
+			}
+
+			animationTime = 0.0f;
+			start = std::chrono::high_resolution_clock::now();
 		}
 	}
-	// 输出总体性能统计
-	auto totalEnd = std::chrono::high_resolution_clock::now();
-	double totalTime = std::chrono::duration<double, std::milli>(totalEnd - totalStart).count();
-
-	std::cout << "\nFinal Performance Statistics:\n";
-	std::cout << "Total Frames: " << frameCount << "\n";
-	std::cout << "Total Time: " << totalTime << "ms\n";
-	std::cout << "Average FPS: " << (frameCount * 1000.0 / totalTime) << "\n";
 
 	// 清理资源
-	for (auto& m : scene)
+	for (auto& m : scene) {
 		delete m;
-
+	}
 }
 
 // Entry point of the application
@@ -409,7 +659,8 @@ int main() {
 		case 2:
 		case 3:
 		case 4: {
-			// 手动测试单个场景
+			// 单一场景测试：设置为无限制模式
+			setSceneRunMode(false);
 			void (*sceneFunc)() = nullptr;
 			switch (choice) {
 			case 1: sceneFunc = scene1; break;
@@ -422,31 +673,36 @@ int main() {
 		}
 		case 5: {
 			// 运行完整性能测试
+			// 性能测试模式：设置为限制cycle模式
+			setSceneRunMode(true);
 			std::cout << "Start performance test...\n";
 
 			// Scene1测试
-			std::cout << "Scene1...\n";
+			std::cout << "Scene1 Original...\n";
 #define USE_SIMD_OPTIMIZATION 0
 			benchmark.runBenchmark("Scene1", scene1, false);
 #undef USE_SIMD_OPTIMIZATION
+			std::cout << "Scene1 SIMD Optimized...\n";
 #define USE_SIMD_OPTIMIZATION 1
 			benchmark.runBenchmark("Scene1", scene1, true);
 #undef USE_SIMD_OPTIMIZATION
 
 			// Scene2测试
-			std::cout << "Scene2...\n";
+			std::cout << "Scene2 Original...\n";
 #define USE_SIMD_OPTIMIZATION 0
 			benchmark.runBenchmark("Scene2", scene2, false);
 #undef USE_SIMD_OPTIMIZATION
+			std::cout << "Scene2 SIMD Optimized...\n";
 #define USE_SIMD_OPTIMIZATION 1
 			benchmark.runBenchmark("Scene2", scene2, true);
 #undef USE_SIMD_OPTIMIZATION
 
 			// Scene3测试
-			std::cout << "Scene3...\n";
+			std::cout << "Scene3 Original...\n";
 #define USE_SIMD_OPTIMIZATION 0
 			benchmark.runBenchmark("Scene3", scene3, false);
 #undef USE_SIMD_OPTIMIZATION
+			std::cout << "Scene3 SIMD Optimized...\n";
 #define USE_SIMD_OPTIMIZATION 1
 			benchmark.runBenchmark("Scene3", scene3, true);
 #undef USE_SIMD_OPTIMIZATION
