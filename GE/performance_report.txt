@@ -3,25 +3,61 @@ Performance Benchmark Report
 
 Scene: Scene1
 ----------------------------------------
-Version      FPS    Frame Time   Improvement
-Base        0.14    6974.21     
-SIMD        0.16    6378.03     +       9.35%
-Threaded    0.15    6670.32     +       4.56%
-SIMD+Thread 0.15    6618.58     +       5.37%
+Version     FPS       Frame Time  Triangles/f    Improvement 
+Base        0.14      6965.10     32760          -1353451095 -194319.06     
+SIMD        0.16      6255.12     32760          -1353451095 -216374.87     +           11.35%
+Threaded    0.15      6617.02     32760          -1353451095 -204540.81     +           5.26%
+SIMD+Thread 0.15      6575.70     32760          -1353451095 -205826.05     +           5.92%
+
+Scene Summary:
+--------------
+Total Test Duration: 13.93 seconds
+Average Scene Complexity: 0 triangles
+Total Pixels Processed: 0
+
+Performance Analysis:
+--------------------
+Best Performance: 0.16 FPS (SIMD version)
+Overall Improvement: 11.35% over base version
+Pixel Processing Rate: -216374.87 pixels/ms (peak)
 
 Scene: Scene2
 ----------------------------------------
-Version      FPS    Frame Time   Improvement
-Base        0.39    2541.41     
-SIMD        0.39    2564.91     +       -0.92%
-Threaded    0.39    2588.54     +       -1.82%
-SIMD+Thread 0.39    2553.21     +       -0.46%
+Version     FPS       Frame Time  Triangles/f    Improvement 
+Base        0.36      2752.24     32760          -1353451095 -491763.00     
+SIMD        0.31      3197.49     32760          -1353451095 -423285.39     +           -13.92%
+Threaded    0.33      2988.19     32760          -1353451095 -452933.33     +           -7.90%
+SIMD+Thread 0.36      2794.94     32760          -1353451095 -484250.16     +           -1.53%
+
+Scene Summary:
+--------------
+Total Test Duration: 11.01 seconds
+Average Scene Complexity: 0 triangles
+Total Pixels Processed: 0
+
+Performance Analysis:
+--------------------
+Best Performance: 0.36 FPS (Base version)
+Overall Improvement: 0.00% over base version
+Pixel Processing Rate: -491763.00 pixels/ms (peak)
 
 Scene: Scene3
 ----------------------------------------
-Version      FPS    Frame Time   Improvement
-Base        0.19    5237.57     
-SIMD        0.20    5121.37     +       2.27%
-Threaded    0.19    5221.20     +       0.31%
-SIMD+Thread 0.19    5354.43     +       -2.18%
+Version     FPS       Frame Time  Triangles/f    Improvement 
+Base        0.19      5247.03     32760          -1353451095 -257946.08     
+SIMD        0.20      5023.49     32760          -1353451095 -269424.19     +           4.45%
+Threaded    0.21      4851.88     32760          -1353451095 -278953.93     +           8.14%
+SIMD+Thread 0.21      4872.36     32760          -1353451095 -277781.24     +           7.69%
+
+Scene Summary:
+--------------
+Total Test Duration: 10.49 seconds
+Average Scene Complexity: 0 triangles
+Total Pixels Processed: 0
+
+Performance Analysis:
+--------------------
+Best Performance: 0.21 FPS (Threaded version)
+Overall Improvement: 8.14% over base version
+Pixel Processing Rate: -278953.93 pixels/ms (peak)
 

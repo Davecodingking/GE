@@ -26,8 +26,8 @@ private:
 
     struct PerformanceMetrics {
         double frameTime;
-        int triangleCount;
-        int pixelsProcessed;
+        std::atomic<int> triangleCount;     // 改为原子类型,因为三角形也可能在多线程中处理
+        std::atomic<int> pixelsProcessed;
         std::atomic<int> activeThreads;
 
         // 添加构造函数
@@ -55,6 +55,11 @@ private:
     std::atomic<bool> isRendering;
 
 public:
+
+    int getCurrentPixelCount() const {
+        return metrics.pixelsProcessed.load(std::memory_order_relaxed);
+    }
+
     Zbuffer<float> zbuffer;
     GamesEngineeringBase::Window canvas;
 
@@ -64,7 +69,7 @@ public:
     matrix perspective;
 #endif
 
-    // 构造函数保持不变
+    
     Renderer() {
         canvas.create(1024, 768, "Raster");
         zbuffer.create(1024, 768);
@@ -76,6 +81,16 @@ public:
         resetMetrics();
         metrics.activeThreads = 0;
         isRendering = false;
+    }
+   
+    // 添加线程安全的像素记录方法
+    void recordPixelProcessed() {
+        metrics.pixelsProcessed.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    // 修改三角形记录方法也为线程安全
+    void recordTriangleProcessed() {
+        metrics.triangleCount.fetch_add(1, std::memory_order_relaxed);
     }
 
     // 添加线程安全的像素绘制函数
@@ -164,14 +179,7 @@ public:
         resetMetrics();
     }
 
-    void recordTriangleProcessed() {
-        metrics.triangleCount++;
-    }
-
-    void recordPixelProcessed() {
-        metrics.pixelsProcessed++;
-    }
-
+  
     const PerformanceMetrics& getPerformanceMetrics() const {
         return metrics;
     }
@@ -187,6 +195,8 @@ public:
             << (metrics.triangleCount > 0 ? metrics.pixelsProcessed / metrics.triangleCount : 0) << "\n";
         return ss.str();
     }
+
+    
 
 private:
     // 修改重置函数

@@ -152,6 +152,7 @@ public:
                         a.toRGB(r, g, b);
                         renderer.canvas.draw(x, y, r, g, b);
                         renderer.zbuffer(x, y) = depth;
+                        renderer.recordPixelProcessed(); // 添加像素统计
                     }
                 }
             }
@@ -179,6 +180,7 @@ public:
                         a.toRGB(r, g, b);
                         renderer.canvas.draw(x, y, r, g, b);
                         renderer.zbuffer(x, y) = depth;
+                        renderer.recordPixelProcessed(); // 添加像素统计
                     }
                 }
             }
@@ -295,6 +297,7 @@ private:
             unsigned char r, g, b;
             a.toRGB(r, g, b);
             task.renderer->drawPixelThreadSafe(x, y, r, g, b, depth);
+            task.renderer->recordPixelProcessed(); // 使用 task.renderer 而不是 renderer
         }
 #else
         colour c = interpolate(beta, gamma, alpha, v[0].rgb, v[1].rgb, v[2].rgb);
@@ -328,6 +331,7 @@ private:
             unsigned char r, g, b;
             final_color.toRGB(r, g, b);
             task.renderer->drawPixelThreadSafe(x, y, r, g, b, depth);
+            task.renderer->recordPixelProcessed(); // 使用 task.renderer 而不是 renderer
         }
 #endif
     }

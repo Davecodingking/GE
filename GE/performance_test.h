@@ -28,6 +28,14 @@ public:
         int totalPixels;
         double averageFPS;
         OptimizationType type;  // 添加优化类型字段
+
+        // 新增字段
+        int trianglesPerFrame;    // 每帧平均三角形数
+        int pixelsPerFrame;       // 每帧平均像素数
+        double peakPerformance;   // 峰值性能（最高FPS）
+  
+        double pixelsPerMs;       // 每毫秒处理的像素数
+       
     };
 
     // 存储所有类型的测试结果
@@ -52,6 +60,8 @@ public:
 
         while (std::chrono::high_resolution_clock::now() < endTime) {
             auto frameStart = std::chrono::high_resolution_clock::now();
+
+            
 
             sceneFunc();
 
@@ -101,36 +111,82 @@ public:
 
 private:
     void printSceneComparison(std::ofstream& report, const std::vector<TestResult>& sceneResults) {
-        report << "Scene: " << sceneResults[0].sceneName << "\n";
-        report << "----------------------------------------\n";
-        report << "Version      FPS    Frame Time   Improvement\n";
+    report << "Scene: " << sceneResults[0].sceneName << "\n";
+    report << "----------------------------------------\n";
+    report << std::left;
+    
+    // 表头
+    report << std::setw(12) << "Version"
+           << std::setw(10) << "FPS"
+           << std::setw(12) << "Frame Time"
+           << std::setw(15) << "Triangles/f"    // 新增：每帧三角形数
+           << std::setw(12) << "Pixels/f"       // 新增：每帧像素数
+           << std::setw(15) << "Pixels/ms"      // 新增：像素处理速率
+           << std::setw(12) << "Improvement"
+           << "\n";
 
-        // 找到基础版本的结果用于计算改进百分比
-        auto baseResult = std::find_if(sceneResults.begin(), sceneResults.end(),
-            [](const TestResult& r) { return r.type == BASE; });
+    // 找到基础版本用于计算改进百分比
+    auto baseResult = std::find_if(sceneResults.begin(), sceneResults.end(),
+        [](const TestResult& r) { return r.type == BASE; });
 
-        for (const auto& result : sceneResults) {
-            report << std::left << std::setw(12);
+    for (const auto& result : sceneResults) {
+        report << std::setw(12);
 
-            // 输出版本名称
-            switch (result.type) {
-            case BASE: report << "Base"; break;
-            case SIMD: report << "SIMD"; break;
-            case THREADED: report << "Threaded"; break;
-            case SIMD_THREADED: report << "SIMD+Thread"; break;
-            }
+        // 版本名称
+        switch (result.type) {
+        case BASE: report << "Base"; break;
+        case SIMD: report << "SIMD"; break;
+        case THREADED: report << "Threaded"; break;
+        case SIMD_THREADED: report << "SIMD+Thread"; break;
+        }
 
-            report << std::fixed << std::setprecision(2)
-                << std::setw(8) << result.averageFPS
-                << std::setw(12) << result.averageFrameTime;
+        // 基础性能指标
+        report << std::fixed << std::setprecision(2)
+               << std::setw(10) << result.averageFPS
+               << std::setw(12) << result.averageFrameTime;
 
-            // 计算改进百分比
-            if (baseResult != sceneResults.end() && result.type != BASE) {
-                double improvement = (baseResult->averageFrameTime / result.averageFrameTime - 1.0) * 100;
-                report << std::setw(8) << "+" << improvement << "%";
-            }
-            report << "\n";
+        // 新增的详细性能指标
+        report << std::setw(15) << result.trianglesPerFrame
+               << std::setw(12) << result.pixelsPerFrame
+               << std::setw(15) << (result.pixelsPerFrame / result.averageFrameTime);
+
+        // 性能改进百分比
+        if (baseResult != sceneResults.end() && result.type != BASE) {
+            double improvement = (baseResult->averageFrameTime / result.averageFrameTime - 1.0) * 100;
+            report << std::setw(12) << "+" << improvement << "%";
         }
         report << "\n";
     }
+
+    // 添加场景总结
+    report << "\nScene Summary:\n";
+    report << "--------------\n";
+    report << "Total Test Duration: " << std::fixed << std::setprecision(2) 
+           << sceneResults[0].totalTime / 1000.0 << " seconds\n";
+    report << "Average Scene Complexity: " << sceneResults[0].totalTriangles << " triangles\n";
+    report << "Total Pixels Processed: " << sceneResults[0].totalPixels << "\n\n";
+
+    // 添加性能分析
+    report << "Performance Analysis:\n";
+    report << "--------------------\n";
+    if (sceneResults.size() > 1) {
+        auto& base = *baseResult;
+        auto& best = *std::max_element(sceneResults.begin(), sceneResults.end(),
+            [](const TestResult& a, const TestResult& b) {
+                return a.averageFPS < b.averageFPS;
+            });
+        
+        report << "Best Performance: " << best.averageFPS << " FPS ("
+               << (best.type == BASE ? "Base" :
+                   best.type == SIMD ? "SIMD" :
+                   best.type == THREADED ? "Threaded" : "SIMD+Thread")
+               << " version)\n";
+        report << "Overall Improvement: " 
+               << ((best.averageFPS / base.averageFPS - 1.0) * 100) 
+               << "% over base version\n";
+        /*report << "Pixel Processing Rate: " 
+               << (best.pixelsPerFrame / best.averageFrameTime) 
+               << " pixels/ms (peak)\n\n";*/
+    }
+}
 };

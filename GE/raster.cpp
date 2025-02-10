@@ -112,6 +112,7 @@ void render(Renderer& renderer, Mesh* mesh, matrix& camera, Light& L, Optimizati
 // No input variables
 void sceneTest() {
 	Renderer renderer;
+	
 	// create light source {direction, diffuse intensity, ambient intensity}
 	Light L{ vec4(0.f, 1.f, 1.f, 0.f), colour(1.0f, 1.0f, 1.0f), colour(0.1f, 0.1f, 0.1f) };
 	// camera is just a matrix
@@ -631,7 +632,7 @@ int main() {
 	PerformanceBenchmark benchmark;
 
 	while (true) {
-		std::cout << "\n=== Rasterization Testing System 1.0 ===\n";
+		std::cout << "\n=== Rasterization Testing System 3.0 ===\n";
 		std::cout << "1. Scene1 test (moving cubes)\n";
 		std::cout << "2. Scene2 test (cube grid)\n";
 		std::cout << "3. Scene3 test (atomic model)\n";
