@@ -127,7 +127,6 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="performance_test.cpp" />
     <ClCompile Include="raster.cpp" />
   </ItemGroup>
   <ItemGroup>

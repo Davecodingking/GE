@@ -1,0 +1,27 @@
+Performance Benchmark Report
+===========================
+
+Scene: Scene1
+----------------------------------------
+Version      FPS    Frame Time   Improvement
+Base        0.14    6974.21     
+SIMD        0.16    6378.03     +       9.35%
+Threaded    0.15    6670.32     +       4.56%
+SIMD+Thread 0.15    6618.58     +       5.37%
+
+Scene: Scene2
+----------------------------------------
+Version      FPS    Frame Time   Improvement
+Base        0.39    2541.41     
+SIMD        0.39    2564.91     +       -0.92%
+Threaded    0.39    2588.54     +       -1.82%
+SIMD+Thread 0.39    2553.21     +       -0.46%
+
+Scene: Scene3
+----------------------------------------
+Version      FPS    Frame Time   Improvement
+Base        0.19    5237.57     
+SIMD        0.20    5121.37     +       2.27%
+Threaded    0.19    5221.20     +       0.31%
+SIMD+Thread 0.19    5354.43     +       -2.18%
+

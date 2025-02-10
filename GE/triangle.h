@@ -7,19 +7,18 @@
 #include <iostream>
 #include "vec4_simd.h"
 #include "matrix_simd.h"
+#include <thread>
+#include <mutex>
+#include <vector>
 
-// Simple support class for a 2D vector
+// 基础2D向量类，用于屏幕空间计算
 class vec2D {
 public:
     float x, y;
 
-    // Default constructor initializes both components to 0
-    vec2D() { x = y = 0.f; };
-
-    // Constructor initializes components with given values
+    vec2D() { x = y = 0.f; }
     vec2D(float _x, float _y) : x(_x), y(_y) {}
 
-    // Constructor initializes components from a vec4
 #if defined(USE_SIMD_OPTIMIZATION)
     vec2D(Vec4SIMD v) {
         x = v[0];
@@ -32,10 +31,8 @@ public:
     }
 #endif
 
-    // Display the vector components
     void display() { std::cout << x << '\t' << y << std::endl; }
 
-    // Overloaded subtraction operator for vector subtraction
     vec2D operator- (vec2D& v) {
         vec2D q;
         q.x = x - v.x;
@@ -44,9 +41,10 @@ public:
     }
 };
 
-// Class representing a triangle for rendering purposes
+// 三角形渲染类，支持基础版本、SIMD优化和多线程渲染
 class triangle {
-
+private:
+    // 根据编译选项选择顶点结构
 #if defined(USE_SIMD_OPTIMIZATION)
     struct VertexSIMD {
         Vec4SIMD p;
@@ -58,14 +56,21 @@ class triangle {
     Vertex v[3];
 #endif
 
-    
-    float area;        // Area of the triangle
-    colour col[3];     // Colors for each vertex of the triangle
+    float area;
+    colour col[3];
+
+    // 渲染任务结构，用于多线程渲染
+    struct RenderTask {
+        int startY;
+        int endY;
+        Renderer* renderer;
+        const Light* light;
+        float ka;
+        float kd;
+    };
 
 public:
-    // Constructor initializes the triangle with three vertices
-    // Input Variables:
-    // - v1, v2, v3: Vertices defining the triangle
+    // 构造函数 - 支持SIMD和非SIMD版本
 #if defined(USE_SIMD_OPTIMIZATION)
     triangle(const VertexSIMD& v1, const VertexSIMD& v2, const VertexSIMD& v3) {
         v[0] = v1;
@@ -88,26 +93,16 @@ public:
     }
 #endif
 
-    // Helper function to compute the cross product for barycentric coordinates
-    // Input Variables:
-    // - v1, v2: Edges defining the vector
-    // - p: Point for which coordinates are being calculated
+    // 计算重心坐标的辅助函数
     float getC(vec2D v1, vec2D v2, vec2D p) {
         vec2D e = v2 - v1;
         vec2D q = p - v1;
         return q.y * e.x - q.x * e.y;
     }
 
-    // Compute barycentric coordinates for a given point
-    // Input Variables:
-    // - p: Point to check within the triangle
-    // Output Variables:
-    // - alpha, beta, gamma: Barycentric coordinates of the point
-    // Returns true if the point is inside the triangle, false otherwise
-
+    // 计算点p的重心坐标
     bool getCoordinates(vec2D p, float& alpha, float& beta, float& gamma) {
 #if defined(USE_SIMD_OPTIMIZATION)
-        // SIMD优化的重心坐标计算
         alpha = getC(vec2D(v[0].p), vec2D(v[1].p), p) / area;
         beta = getC(vec2D(v[1].p), vec2D(v[2].p), p) / area;
         gamma = getC(vec2D(v[2].p), vec2D(v[0].p), p) / area;
@@ -121,11 +116,13 @@ public:
         return true;
     }
 
+    // 插值函数模板
     template <typename T>
     T interpolate(float alpha, float beta, float gamma, T a1, T a2, T a3) {
         return (a1 * alpha) + (a2 * beta) + (a3 * gamma);
     }
 
+    // 基础版本的渲染函数
     void draw(Renderer& renderer, Light& L, float ka, float kd) {
         vec2D minV, maxV;
         getBoundsWindow(renderer.canvas, minV, maxV);
@@ -133,7 +130,7 @@ public:
         if (area < 1.f) return;
 
 #if defined(USE_SIMD_OPTIMIZATION)
-        // SIMD优化的渲染循环
+        // SIMD优化版本的渲染循环
         for (int y = (int)(minV.y); y < (int)ceil(maxV.y); y++) {
             for (int x = (int)(minV.x); x < (int)ceil(maxV.x); x++) {
                 float alpha, beta, gamma;
@@ -160,7 +157,7 @@ public:
             }
         }
 #else
-        // 原始实现的渲染循环
+        // 基础版本的渲染循环
         for (int y = (int)(minV.y); y < (int)ceil(maxV.y); y++) {
             for (int x = (int)(minV.x); x < (int)ceil(maxV.x); x++) {
                 float alpha, beta, gamma;
@@ -189,9 +186,42 @@ public:
 #endif
     }
 
-    // Compute the 2D bounds of the triangle
-    // Output Variables:
-    // - minV, maxV: Minimum and maximum bounds in 2D space
+    // 多线程渲染的主函数
+    void drawThreaded(Renderer& renderer, Light& L, float ka, float kd) {
+        vec2D minV, maxV;
+        getBoundsWindow(renderer.canvas, minV, maxV);
+
+        if (area < 1.f || (maxV.y - minV.y) < 50) {
+            draw(renderer, L, ka, kd);
+            return;
+        }
+
+        int totalHeight = static_cast<int>(ceil(maxV.y) - floor(minV.y));
+        int heightPerThread = totalHeight / MAX_THREADS;
+        std::vector<std::thread> threads;
+
+        for (int i = 0; i < MAX_THREADS; ++i) {
+            RenderTask task;
+            task.startY = static_cast<int>(floor(minV.y)) + i * heightPerThread;
+            task.endY = (i == MAX_THREADS - 1) ?
+                static_cast<int>(ceil(maxV.y)) :
+                task.startY + heightPerThread;
+            task.renderer = &renderer;
+            task.light = &L;
+            task.ka = ka;
+            task.kd = kd;
+
+            threads.emplace_back(&triangle::renderSegment, this,
+                task, static_cast<int>(floor(minV.x)),
+                static_cast<int>(ceil(maxV.x)));
+        }
+
+        for (auto& thread : threads) {
+            thread.join();
+        }
+    }
+
+    // 获取三角形在屏幕空间的边界
     void getBounds(vec2D& minV, vec2D& maxV) {
         minV = vec2D(v[0].p);
         maxV = vec2D(v[0].p);
@@ -203,11 +233,7 @@ public:
         }
     }
 
-    // Compute the 2D bounds of the triangle, clipped to the canvas
-    // Input Variables:
-    // - canvas: Reference to the rendering canvas
-    // Output Variables:
-    // - minV, maxV: Clipped minimum and maximum bounds
+    // 获取经过canvas裁剪的三角形边界
     void getBoundsWindow(GamesEngineeringBase::Window& canvas, vec2D& minV, vec2D& maxV) {
         getBounds(minV, maxV);
         minV.x = max(minV.x, 0);
@@ -216,9 +242,7 @@ public:
         maxV.y = min(maxV.y, canvas.getHeight());
     }
 
-    // Debugging utility to display the triangle bounds on the canvas
-    // Input Variables:
-    // - canvas: Reference to the rendering canvas
+    // 调试函数：绘制三角形边界
     void drawBounds(GamesEngineeringBase::Window& canvas) {
         vec2D minV, maxV;
         getBounds(minV, maxV);
@@ -230,11 +254,81 @@ public:
         }
     }
 
-    // Debugging utility to display the coordinates of the triangle vertices
+    // 调试函数：显示三角形顶点信息
     void display() {
         for (unsigned int i = 0; i < 3; i++) {
             v[i].p.display();
         }
         std::cout << std::endl;
+    }
+
+private:
+    // 多线程渲染中单个线程的渲染函数
+    void renderSegment(RenderTask task, int minX, int maxX) {
+        for (int y = task.startY; y < task.endY; ++y) {
+            for (int x = minX; x < maxX; ++x) {
+                float alpha, beta, gamma;
+
+                if (getCoordinates(vec2D((float)x, (float)y), alpha, beta, gamma)) {
+                    processPixel(task, x, y, alpha, beta, gamma);
+                }
+            }
+        }
+    }
+
+    // 处理单个像素的渲染
+    void processPixel(const RenderTask& task, int x, int y, float alpha, float beta, float gamma) {
+#if defined(USE_SIMD_OPTIMIZATION)
+        colour c = interpolate(beta, gamma, alpha, v[0].rgb, v[1].rgb, v[2].rgb);
+        c.clampColour();
+
+        float depth = interpolate(beta, gamma, alpha, v[0].p[2], v[1].p[2], v[2].p[2]);
+        Vec4SIMD normal = interpolate(beta, gamma, alpha, v[0].normal, v[1].normal, v[2].normal);
+        normal.normalise();
+
+        if (depth > 0.01f) {
+            
+            task.light->omega_i.normalise();
+            float dot = max(Vec4SIMD::dot(Vec4SIMD(task.light->omega_i), normal), 0.0f);
+            colour a = (c * task.kd) * (task.light->L * dot + (task.light->ambient * task.ka));
+
+            unsigned char r, g, b;
+            a.toRGB(r, g, b);
+            task.renderer->drawPixelThreadSafe(x, y, r, g, b, depth);
+        }
+#else
+        colour c = interpolate(beta, gamma, alpha, v[0].rgb, v[1].rgb, v[2].rgb);
+        c.clampColour();
+
+        float depth = interpolate(beta, gamma, alpha, v[0].p[2], v[1].p[2], v[2].p[2]);
+        vec4 normal = interpolate(beta, gamma, alpha, v[0].normal, v[1].normal, v[2].normal);
+        normal.normalise();
+
+        if (depth > 0.01f) {
+            
+            vec4 light_dir = task.light->omega_i;
+            light_dir.normalise();
+
+            float dot = max(vec4::dot(light_dir, normal), 0.0f);
+
+            // 修正颜色计算
+            colour diffuse = task.light->L;
+            diffuse = diffuse * dot;  // 使用已定义的 colour * float 运算符
+
+            colour ambient = task.light->ambient;
+            ambient = ambient * task.ka;  // 使用已定义的 colour * float 运算符
+
+            colour final_color = c;
+            final_color = final_color * task.kd;  // 使用已定义的 colour * float 运算符
+
+            // 组合光照结果
+            colour light_result = diffuse + ambient;  // 使用已定义的 colour + colour 运算符
+            final_color = final_color * light_result;  // 使用已定义的 colour * colour 运算符
+
+            unsigned char r, g, b;
+            final_color.toRGB(r, g, b);
+            task.renderer->drawPixelThreadSafe(x, y, r, g, b, depth);
+        }
+#endif
     }
 };

@@ -25,6 +25,14 @@
 // - L: Light object representing the lighting parameters.
 
 
+//// 定义优化模式枚举
+//enum OptimizationMode {
+//	BASE,           // 基础版本
+//	SIMD,           // SIMD优化版本
+//	THREADED,       // 多线程优化版本
+//	SIMD_THREADED   // SIMD+多线程组合优化
+//};
+
 int g_maxCycles;
 bool g_isPerformanceTest;
 
@@ -42,75 +50,63 @@ void setSceneRunMode(bool isPerformanceTest) {
 	}
 }
 
-void render(Renderer& renderer, Mesh* mesh, matrix& camera, Light& L) {
-	// 为当前帧启动性能指标收集
+// 主要渲染函数，支持不同的优化模式
+void render(Renderer& renderer, Mesh* mesh, matrix& camera, Light& L, OptimizationType mode) {
+	// 启动性能指标收集
 	renderer.startFrameMetrics();
 
-#if defined(USE_SIMD_OPTIMIZATION)
-	// SIMD优化版本
-	MatrixSIMD p = renderer.perspective * MatrixSIMD(camera) * MatrixSIMD(mesh->world);
-
-	for (triIndices& ind : mesh->triangles) {
-		renderer.recordTriangleProcessed();  // 记录三角形处理
-
-		VertexSIMD t[3];
-		for (unsigned int i = 0; i < 3; i++) {
-			t[i].p = p * Vec4SIMD(mesh->vertices[ind.v[i]].p);
-			t[i].p.divideW();
-
-			t[i].normal = MatrixSIMD(mesh->world) * Vec4SIMD(mesh->vertices[ind.v[i]].normal);
-			t[i].normal.normalise();
-
-			// 转换到屏幕空间
-			renderer.applyViewportTransform(t[i].p);
-
-			t[i].rgb = mesh->vertices[ind.v[i]].rgb;
-		}
-
-		// 检查Z值是否在有效范围内
-		if (fabs(t[0].p[2]) > 1.0f || fabs(t[1].p[2]) > 1.0f || fabs(t[2].p[2]) > 1.0f)
-			continue;
-
-		triangle tri(t[0], t[1], t[2]);
-		tri.draw(renderer, L, mesh->ka, mesh->kd);
-	}
-
-#else 
-	// Combine perspective, camera, and world transformations for the mesh
+	// 组合所有变换矩阵
 	matrix p = renderer.perspective * camera * mesh->world;
 
-	// Iterate through all triangles in the mesh
+	// 处理网格中的每个三角形
 	for (triIndices& ind : mesh->triangles) {
-		Vertex t[3]; // Temporary array to store transformed triangle vertices
+		renderer.recordTriangleProcessed();
 
-		// Transform each vertex of the triangle
+		Vertex t[3];
+		// 变换每个顶点
 		for (unsigned int i = 0; i < 3; i++) {
-			t[i].p = p * mesh->vertices[ind.v[i]].p; // Apply transformations
-			t[i].p.divideW(); // Perspective division to normalize coordinates
+			t[i].p = p * mesh->vertices[ind.v[i]].p;
+			t[i].p.divideW();
 
-			// Transform normals into world space for accurate lighting
-			// no need for perspective correction as no shearing or non-uniform scaling
 			t[i].normal = mesh->world * mesh->vertices[ind.v[i]].normal;
 			t[i].normal.normalise();
 
-			// Map normalized device coordinates to screen space
-			t[i].p[0] = (t[i].p[0] + 1.f) * 0.5f * static_cast<float>(renderer.canvas.getWidth());
-			t[i].p[1] = (t[i].p[1] + 1.f) * 0.5f * static_cast<float>(renderer.canvas.getHeight());
-			t[i].p[1] = renderer.canvas.getHeight() - t[i].p[1]; // Invert y-axis
-
-			// Copy vertex colours
+			// 应用视口变换
+			renderer.applyViewportTransform(t[i].p);
 			t[i].rgb = mesh->vertices[ind.v[i]].rgb;
 		}
 
-		// Clip triangles with Z-values outside [-1, 1]
-		if (fabs(t[0].p[2]) > 1.0f || fabs(t[1].p[2]) > 1.0f || fabs(t[2].p[2]) > 1.0f) continue;
+		// 深度裁剪
+		if (fabs(t[0].p[2]) > 1.0f || fabs(t[1].p[2]) > 1.0f || fabs(t[2].p[2]) > 1.0f)
+			continue;
 
-		// Create a triangle object and render it
+		// 根据优化模式选择渲染方式
 		triangle tri(t[0], t[1], t[2]);
-		tri.draw(renderer, L, mesh->ka, mesh->kd);
-	}
+		switch (mode) {
+		case BASE:
+			tri.draw(renderer, L, mesh->ka, mesh->kd);
+			break;
+		case SIMD:
+#if defined(USE_SIMD_OPTIMIZATION)
+			tri.draw(renderer, L, mesh->ka, mesh->kd);
+#else
+			tri.draw(renderer, L, mesh->ka, mesh->kd);
 #endif
+			break;
+		case THREADED:
+			tri.drawThreaded(renderer, L, mesh->ka, mesh->kd);
+			break;
+		case SIMD_THREADED:
+#if defined(USE_SIMD_OPTIMIZATION)
+			tri.drawThreaded(renderer, L, mesh->ka, mesh->kd);
+#else
+			tri.drawThreaded(renderer, L, mesh->ka, mesh->kd);
+#endif
+			break;
+		}
+	}
 }
+
 
 // Test scene function to demonstrate rendering with user-controlled transformations
 // No input variables
@@ -157,7 +153,7 @@ void sceneTest() {
 
 		// Render each object in the scene
 		for (auto& m : scene)
-			render(renderer, m, camera, L);
+			render(renderer, m, camera, L,BASE);
 
 		renderer.present(); // Display the rendered frame
 	}
@@ -251,7 +247,7 @@ void scene1() {
 
 		// 渲染所有物体
 		for (auto& m : scene) {
-			render(renderer, m, camera, L);
+			render(renderer, m, camera, L,BASE);
 		}
 		renderer.present();
 
@@ -385,7 +381,7 @@ void scene2() {
 
 		// 渲染场景中的所有物体
 		for (auto& m : scene) {
-			render(renderer, m, camera, L);
+			render(renderer, m, camera, L,BASE);
 		}
 		renderer.present();
 
@@ -583,7 +579,7 @@ void scene3() {
 
 		// 渲染场景
 		for (auto& m : scene) {
-			render(renderer, m, camera, L);
+			render(renderer, m, camera, L,BASE);
 		}
 		renderer.present();
 
@@ -632,20 +628,14 @@ void scene3() {
 // Entry point of the application
 // No input variables
 int main() {
-	// Uncomment the desired scene function to run
-	//scene1();
-	//scene2();
-	//sceneTest(); 
-
-
 	PerformanceBenchmark benchmark;
 
 	while (true) {
 		std::cout << "\n=== Rasterization Testing System 1.0 ===\n";
-		std::cout << "1. Scene1 test (cubes)\n";
-		std::cout << "2. Scene2 test (cube mesh)\n";
-		std::cout << "3. Scene3 test (sphere mesh)\n";
-		std::cout << "4. simple sence test\n";
+		std::cout << "1. Scene1 test (moving cubes)\n";
+		std::cout << "2. Scene2 test (cube grid)\n";
+		std::cout << "3. Scene3 test (atomic model)\n";
+		std::cout << "4. Simple scene test\n";
 		std::cout << "5. RUN THE FULL PERFORMANCE TEST!(All SCENE)\n";
 		std::cout << "0. Quit\n";
 
@@ -655,63 +645,105 @@ int main() {
 		switch (choice) {
 		case 0:
 			return 0;
+
 		case 1:
 		case 2:
 		case 3:
 		case 4: {
 			// 单一场景测试：设置为无限制模式
 			setSceneRunMode(false);
-			void (*sceneFunc)() = nullptr;
-			switch (choice) {
-			case 1: sceneFunc = scene1; break;
-			case 2: sceneFunc = scene2; break;
-			case 3: sceneFunc = scene3; break;
-			case 4: sceneFunc = sceneTest; break;
+
+			// 选择优化模式
+			std::cout << "\nSelect optimization mode:\n";
+			std::cout << "1. Base Version\n";
+			std::cout << "2. SIMD Optimization\n";
+			std::cout << "3. Multi-threaded\n";
+			std::cout << "4. SIMD + Multi-threaded\n";
+
+			int modeChoice;
+			std::cin >> modeChoice;
+
+			OptimizationType mode;
+			switch (modeChoice) {
+			case 1: mode = OptimizationType::BASE; break;
+			case 2: mode = OptimizationType::SIMD; break;
+			case 3: mode = OptimizationType::THREADED; break;
+			case 4: mode = OptimizationType::SIMD_THREADED; break;
+			default: continue;
 			}
-			sceneFunc();
+
+			// 根据场景选择运行相应的函数
+			switch (choice) {
+			case 1:
+				scene1();
+				break;
+			case 2:
+				scene2();
+				break;
+			case 3:
+				scene3();
+				break;
+			case 4:
+				sceneTest();
+				break;
+			}
 			break;
 		}
+
 		case 5: {
+
 			// 运行完整性能测试
-			// 性能测试模式：设置为限制cycle模式
 			setSceneRunMode(true);
+			
 			std::cout << "Start performance test...\n";
 
 			// Scene1测试
-			std::cout << "Scene1 Original...\n";
-#define USE_SIMD_OPTIMIZATION 0
-			benchmark.runBenchmark("Scene1", scene1, false);
-#undef USE_SIMD_OPTIMIZATION
-			std::cout << "Scene1 SIMD Optimized...\n";
-#define USE_SIMD_OPTIMIZATION 1
-			benchmark.runBenchmark("Scene1", scene1, true);
-#undef USE_SIMD_OPTIMIZATION
+			std::cout << "\n\nScene1 Base version...\n";
+			benchmark.runBenchmark("Scene1", scene1, OptimizationType::BASE);
 
-			// Scene2测试
-			std::cout << "Scene2 Original...\n";
-#define USE_SIMD_OPTIMIZATION 0
-			benchmark.runBenchmark("Scene2", scene2, false);
-#undef USE_SIMD_OPTIMIZATION
-			std::cout << "Scene2 SIMD Optimized...\n";
-#define USE_SIMD_OPTIMIZATION 1
-			benchmark.runBenchmark("Scene2", scene2, true);
-#undef USE_SIMD_OPTIMIZATION
+			std::cout << "\nScene1 SIMD version...\n";
+			benchmark.runBenchmark("Scene1", scene1, OptimizationType::SIMD);
 
-			// Scene3测试
-			std::cout << "Scene3 Original...\n";
-#define USE_SIMD_OPTIMIZATION 0
-			benchmark.runBenchmark("Scene3", scene3, false);
-#undef USE_SIMD_OPTIMIZATION
-			std::cout << "Scene3 SIMD Optimized...\n";
-#define USE_SIMD_OPTIMIZATION 1
-			benchmark.runBenchmark("Scene3", scene3, true);
-#undef USE_SIMD_OPTIMIZATION
+			std::cout << "\nScene1 Threaded version...\n";
+			benchmark.runBenchmark("Scene1", scene1, OptimizationType::THREADED);
 
-			// 生成报告
+			std::cout << "\nScene1 SIMD+Thread version...\n";
+			benchmark.runBenchmark("Scene1", scene1, OptimizationType::SIMD_THREADED);
+
+			// Scene2测试（类似的四个版本）...
+			 std::cout << "\n\nScene2 Base version...\n";
+			benchmark.runBenchmark("Scene2", scene2, OptimizationType::BASE);
+
+			std::cout << "\nScene2 SIMD version...\n";
+			benchmark.runBenchmark("Scene2", scene2, OptimizationType::SIMD);
+
+			std::cout << "\nScene2 Threaded version...\n";
+			benchmark.runBenchmark("Scene2", scene2, OptimizationType::THREADED);
+
+			std::cout << "\nScene3 SIMD+Thread version...\n";
+			benchmark.runBenchmark("Scene2", scene2, OptimizationType::SIMD_THREADED);
+
+			// Scene3测试（类似的四个版本）...
+
+			std::cout << "\n\nScene3 Base version...\n";
+			benchmark.runBenchmark("Scene3", scene3, OptimizationType::BASE);
+
+			std::cout << "\nScene3 SIMD version...\n";
+			benchmark.runBenchmark("Scene3", scene3, OptimizationType::SIMD);
+
+			std::cout << "\nScene3 Threaded version...\n";
+			benchmark.runBenchmark("Scene3", scene3, OptimizationType::THREADED);
+
+			std::cout << "Scene3 SIMD+Thread version...\n";
+			benchmark.runBenchmark("Scene3", scene3, OptimizationType::SIMD_THREADED);
+
+
+			// 生成完整报告
 			benchmark.generateReport("performance_report.txt");
-			std::cout << "Performance Test Finished! the report has been written in performance_report.txt\n";
+			std::cout << "Performance Test Finished! Report written to performance_report.txt\n";
 			break;
 		}
+
 		default:
 			std::cout << "Invalid Choice!\n";
 		}

@@ -7,9 +7,16 @@
 #include "renderer.h"
 #include <functional>
 
+// 定义优化类型枚举
+enum OptimizationType {
+    BASE,           // 基础版本
+    SIMD,           // SIMD优化版本
+    THREADED,       // 多线程优化版本
+    SIMD_THREADED   // SIMD+多线程组合优化
+};
 
 class PerformanceBenchmark {
-private:
+public:
     struct TestResult {
         std::string sceneName;
         double averageFrameTime;
@@ -20,14 +27,16 @@ private:
         int totalTriangles;
         int totalPixels;
         double averageFPS;
+        OptimizationType type;  // 添加优化类型字段
     };
 
-    std::vector<TestResult> simdResults;
-    std::vector<TestResult> baseResults;
+    // 存储所有类型的测试结果
+    std::vector<TestResult> results;
 
 public:
-    void runBenchmark(const std::string& sceneName,std::function<void()> sceneFunc,
-        bool simdEnabled,
+    void runBenchmark(const std::string& sceneName,
+        std::function<void()> sceneFunc,
+        OptimizationType type,
         int testDurationSeconds = 10) {
         TestResult result;
         result.sceneName = sceneName;
@@ -36,6 +45,7 @@ public:
         result.totalPixels = 0;
         result.minFrameTime = (std::numeric_limits<double>::max)();
         result.maxFrameTime = 0;
+        result.type = type;
 
         auto startTime = std::chrono::high_resolution_clock::now();
         auto endTime = startTime + std::chrono::seconds(testDurationSeconds);
@@ -58,13 +68,7 @@ public:
         result.averageFrameTime = result.totalTime / result.frameCount;
         result.averageFPS = 1000.0 / result.averageFrameTime;
 
-        if (simdEnabled) {
-            simdResults.push_back(result);
-        }
-        else {
-            baseResults.push_back(result);
-        }
-
+        results.push_back(result);
     }
 
     void generateReport(const std::string& filename) {
@@ -74,27 +78,59 @@ public:
         report << "Performance Benchmark Report\n";
         report << "===========================\n\n";
 
-        for (size_t i = 0; i < baseResults.size(); i++) {
-            const auto& base = baseResults[i];
-            const auto& simd = simdResults[i];
+        // 按场景分组显示结果
+        std::string currentScene = "";
+        std::vector<TestResult> sceneResults;
 
-            report << "Scene: " << base.sceneName << "\n";
-            report << "----------------------------------------\n";
-            report << "                   Base        SIMD     Improvement\n";
-            report << "Average FPS:       " << std::setw(8) << base.averageFPS
-                << "    " << std::setw(8) << simd.averageFPS
-                << "    " << std::setw(8) << (simd.averageFPS / base.averageFPS * 100 - 100) << "%\n";
+        for (const auto& result : results) {
+            if (currentScene != result.sceneName) {
+                if (!sceneResults.empty()) {
+                    printSceneComparison(report, sceneResults);
+                    sceneResults.clear();
+                }
+                currentScene = result.sceneName;
+            }
+            sceneResults.push_back(result);
+        }
 
-            report << "Frame Time (ms):   " << std::setw(8) << base.averageFrameTime
-                << "    " << std::setw(8) << simd.averageFrameTime
-                << "    " << std::setw(8) << (base.averageFrameTime / simd.averageFrameTime * 100 - 100) << "%\n";
+        // 打印最后一个场景的结果
+        if (!sceneResults.empty()) {
+            printSceneComparison(report, sceneResults);
+        }
+    }
 
-            report << "Min Frame Time:    " << std::setw(8) << base.minFrameTime
-                << "    " << std::setw(8) << simd.minFrameTime << "\n";
-            report << "Max Frame Time:    " << std::setw(8) << base.maxFrameTime
-                << "    " << std::setw(8) << simd.maxFrameTime << "\n";
+private:
+    void printSceneComparison(std::ofstream& report, const std::vector<TestResult>& sceneResults) {
+        report << "Scene: " << sceneResults[0].sceneName << "\n";
+        report << "----------------------------------------\n";
+        report << "Version      FPS    Frame Time   Improvement\n";
 
+        // 找到基础版本的结果用于计算改进百分比
+        auto baseResult = std::find_if(sceneResults.begin(), sceneResults.end(),
+            [](const TestResult& r) { return r.type == BASE; });
+
+        for (const auto& result : sceneResults) {
+            report << std::left << std::setw(12);
+
+            // 输出版本名称
+            switch (result.type) {
+            case BASE: report << "Base"; break;
+            case SIMD: report << "SIMD"; break;
+            case THREADED: report << "Threaded"; break;
+            case SIMD_THREADED: report << "SIMD+Thread"; break;
+            }
+
+            report << std::fixed << std::setprecision(2)
+                << std::setw(8) << result.averageFPS
+                << std::setw(12) << result.averageFrameTime;
+
+            // 计算改进百分比
+            if (baseResult != sceneResults.end() && result.type != BASE) {
+                double improvement = (baseResult->averageFrameTime / result.averageFrameTime - 1.0) * 100;
+                report << std::setw(8) << "+" << improvement << "%";
+            }
             report << "\n";
         }
+        report << "\n";
     }
 };
